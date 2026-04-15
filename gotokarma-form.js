@@ -216,11 +216,13 @@ window.GKFormApp = (() => {
   for (let i = 1; i <= TOTAL_STEPS; i += 1) {
     document.querySelectorAll(`.step-${i}`).forEach(el => {
       el.style.display = "none";
+      el.setAttribute("data-gk-visible", "false");
     });
   }
 
   document.querySelectorAll(`.step-${normalizedStep}`).forEach(el => {
     el.style.display = "block";
+    el.setAttribute("data-gk-visible", "true");
   });
 
   state.currentStep = normalizedStep;
@@ -2097,7 +2099,26 @@ async function init() {
 })();
 
 document.addEventListener("DOMContentLoaded", async () => {
-  if (window.GKFormApp) {
-    await window.GKFormApp.init();
+  if (!window.GKFormApp) return;
+
+  await window.GKFormApp.init();
+
+  const forcedStep = Number(new URLSearchParams(window.location.search).get("step"));
+  const forcedId = new URLSearchParams(window.location.search).get("id");
+
+  if (forcedId && !window.GKFormApp.state.listingId) {
+    window.GKFormApp.state.listingId = forcedId;
+  }
+
+  if (!Number.isNaN(forcedStep) && forcedStep > 0) {
+    setTimeout(() => {
+      window.GKFormApp.showStep(forcedStep);
+      console.log("FORCED STEP AFTER INIT:", forcedStep);
+    }, 50);
+
+    setTimeout(() => {
+      window.GKFormApp.showStep(forcedStep);
+      console.log("FORCED STEP AFTER DELAY:", forcedStep);
+    }, 400);
   }
 });
