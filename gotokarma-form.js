@@ -2036,6 +2036,9 @@ async function init() {
     $$,
     emit,
 
+    getEffectiveListingId,
+    persistListingId,
+    
     init,
     showStep,
     nextStep,
@@ -2135,27 +2138,7 @@ async function init() {
   };
 })();
 
-function forceDisplayStep(step) {
-  const safeStep = Number(step);
-  if (!safeStep || safeStep < 1) return;
 
-  for (let i = 1; i <= 21; i += 1) {
-    document.querySelectorAll(`.step-${i}`).forEach(el => {
-      el.style.display = "none";
-    });
-  }
-
-  document.querySelectorAll(`.step-${safeStep}`).forEach(el => {
-    el.style.display = "block";
-  });
-
-  if (window.GKFormApp) {
-    window.GKFormApp.state.currentStep = safeStep;
-    window.GKFormApp.state.formData.currentStep = safeStep;
-  }
-
-  console.log("FORCE DISPLAY STEP:", safeStep);
-}
 
 function forceDisplayStep(step) {
   const safeStep = Number(step);
@@ -2187,7 +2170,13 @@ function forceRestoreDraftContext() {
   const forcedStep = Number(params.get("step"));
 
   if (forcedId) {
-    window.GKFormApp.state.listingId = forcedId;
+    if (typeof window.GKFormApp.persistListingId === "function") {
+      window.GKFormApp.persistListingId(forcedId);
+    } else {
+      window.GKFormApp.state.listingId = forcedId;
+      window.GKFormApp.state.formData.listingId = forcedId;
+      sessionStorage.setItem("gk_listing_id", forcedId);
+    }
   }
 
   if (!Number.isNaN(forcedStep) && forcedStep > 0) {
