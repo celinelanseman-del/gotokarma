@@ -135,13 +135,7 @@ window.GKFormApp = (() => {
   }
 
   function getEffectiveListingId() {
-  return (
-    state.listingId ||
-    state.formData.listingId ||
-    getQueryParam("id") ||
-    sessionStorage.getItem("gk_listing_id") ||
-    null
-  );
+  return state.listingId || state.formData.listingId || getQueryParam("id") || null;
 }
 
 function persistListingId(listingId) {
@@ -149,7 +143,6 @@ function persistListingId(listingId) {
 
   state.listingId = listingId;
   state.formData.listingId = listingId;
-  sessionStorage.setItem("gk_listing_id", listingId);
 
   const url = new URL(window.location.href);
   url.searchParams.set("id", listingId);
@@ -201,13 +194,11 @@ function persistListingId(listingId) {
   state.isExplicitlySaving = false;
 
   const listingIdFromUrl = getQueryParam("id");
-  const listingIdFromSession = sessionStorage.getItem("gk_listing_id");
-  const effectiveId = listingIdFromUrl || listingIdFromSession || null;
 
-  if (effectiveId) {
-    state.listingId = effectiveId;
-    state.formData.listingId = effectiveId;
-  }
+if (listingIdFromUrl) {
+  state.listingId = listingIdFromUrl;
+  state.formData.listingId = listingIdFromUrl;
+}
 }
 
   function clearSavedDraftLocal() {
@@ -222,6 +213,7 @@ function persistListingId(listingId) {
     state.addressResults = [];
     state.addressDebounce = null;
     state.formData = deepClone(DEFAULT_FORM_DATA);
+    sessionStorage.removeItem("gk_listing_id");
 
     emit("gk:reset");
   }
