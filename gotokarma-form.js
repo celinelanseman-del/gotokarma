@@ -1916,12 +1916,12 @@ if (saveQuitBtn) {
 
     const listingIdFromUrl = getQueryParam("id");
 
-    if (!state.listingId && listingIdFromUrl) {
+    if (listingIdFromUrl) {
       state.listingId = listingIdFromUrl;
     }
 
     if (!state.listingId) {
-      await createListingDraft(state.formData.categories[0] || null);
+      throw new Error("Aucun listingId trouvé pour sauvegarder ce brouillon.");
     }
 
     await syncDraft();
@@ -2120,40 +2120,59 @@ function forceDisplayStep(step) {
   console.log("FORCE DISPLAY STEP:", safeStep);
 }
 
+function forceDisplayStep(step) {
+  const safeStep = Number(step);
+  if (!safeStep || safeStep < 1) return;
+
+  for (let i = 1; i <= 21; i += 1) {
+    document.querySelectorAll(`.step-${i}`).forEach(el => {
+      el.style.display = "none";
+    });
+  }
+
+  document.querySelectorAll(`.step-${safeStep}`).forEach(el => {
+    el.style.display = "block";
+  });
+
+  if (window.GKFormApp) {
+    window.GKFormApp.state.currentStep = safeStep;
+    window.GKFormApp.state.formData.currentStep = safeStep;
+  }
+
+  console.log("FORCE DISPLAY STEP:", safeStep);
+}
+
+function forceRestoreDraftContext() {
+  if (!window.GKFormApp) return;
+
+  const params = new URLSearchParams(window.location.search);
+  const forcedId = params.get("id");
+  const forcedStep = Number(params.get("step"));
+
+  if (forcedId) {
+    window.GKFormApp.state.listingId = forcedId;
+  }
+
+  if (!Number.isNaN(forcedStep) && forcedStep > 0) {
+    window.GKFormApp.state.currentStep = forcedStep;
+    window.GKFormApp.state.formData.currentStep = forcedStep;
+    forceDisplayStep(forcedStep);
+  }
+
+  console.log("RESTORED ID:", window.GKFormApp.state.listingId);
+  console.log("RESTORED STEP:", window.GKFormApp.state.currentStep);
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   if (!window.GKFormApp) return;
 
   await window.GKFormApp.init();
 
-  const params = new URLSearchParams(window.location.search);
-  const forcedStep = Number(params.get("step"));
-  const forcedId = params.get("id");
-
-  if (forcedId && !window.GKFormApp.state.listingId) {
-    window.GKFormApp.state.listingId = forcedId;
-  }
-
-  if (!Number.isNaN(forcedStep) && forcedStep > 0) {
-    setTimeout(() => {
-      forceDisplayStep(forcedStep);
-    }, 50);
-
-    setTimeout(() => {
-      forceDisplayStep(forcedStep);
-    }, 300);
-
-    setTimeout(() => {
-      forceDisplayStep(forcedStep);
-    }, 900);
-  }
+  setTimeout(forceRestoreDraftContext, 50);
+  setTimeout(forceRestoreDraftContext, 300);
+  setTimeout(forceRestoreDraftContext, 900);
 });
 
 window.addEventListener("load", () => {
-  const forcedStep = Number(new URLSearchParams(window.location.search).get("step"));
-
-  if (!Number.isNaN(forcedStep) && forcedStep > 0) {
-    setTimeout(() => {
-      forceDisplayStep(forcedStep);
-    }, 100);
-  }
+  setTimeout(forceRestoreDraftContext, 100);
 });
