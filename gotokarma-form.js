@@ -1857,11 +1857,11 @@ if (listingIdFromUrl) {
   }
 
   function validateStep19() {
-    if (!state.formData.travelLogistics.howToGetThere.trim()) {
-      return "Merci de renseigner comment venir.";
-    }
-    return null;
+  if (!state.formData.travelLogistics.recommendedTransport.trim()) {
+    return "Merci de renseigner comment venir.";
   }
+  return null;
+}
     function getStepValidator(step) {
     const validators = {
       1: validateStep1,
