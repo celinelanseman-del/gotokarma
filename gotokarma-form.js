@@ -542,10 +542,9 @@ if (listingIdFromUrl) {
   }
 
     async function createListingDraft(primaryCategory = null) {
-  const existingId = getEffectiveListingId();
+  const existingId = state.listingId || state.formData.listingId || null;
 
   if (existingId) {
-    persistListingId(existingId);
     return existingId;
   }
 
@@ -1993,16 +1992,21 @@ async function init() {
   const stepFromUrl = Number(getQueryParam("step"));
 
   if (listingIdFromUrl) {
-    persistListingId(listingIdFromUrl);
+  try {
+    const listingData = await fetchOwnListing(listingIdFromUrl);
+    hydrateStateFromListingResponse(listingData);
+  } catch (error) {
+    console.error("GK INIT LOAD ERROR:", error);
 
-    try {
-      const listingData = await fetchOwnListing(listingIdFromUrl);
-      hydrateStateFromListingResponse(listingData);
-    } catch (error) {
-      console.error("GK INIT LOAD ERROR:", error);
-      persistListingId(listingIdFromUrl);
-    }
+    state.listingId = null;
+    state.formData.listingId = null;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("id");
+    url.searchParams.delete("step");
+    window.history.replaceState({}, "", url.toString());
   }
+}
 
   bindGlobalNavigation();
   bindAutoClearErrors();
@@ -2132,66 +2136,10 @@ async function init() {
 
 
 
-function forceDisplayStep(step) {
-  const safeStep = Number(step);
-  if (!safeStep || safeStep < 1) return;
-
-  for (let i = 1; i <= 21; i += 1) {
-    document.querySelectorAll(`.step-${i}`).forEach(el => {
-      el.style.display = "none";
-    });
-  }
-
-  document.querySelectorAll(`.step-${safeStep}`).forEach(el => {
-    el.style.display = "block";
-  });
-
-  if (window.GKFormApp) {
-    window.GKFormApp.state.currentStep = safeStep;
-    window.GKFormApp.state.formData.currentStep = safeStep;
-  }
-
-  console.log("FORCE DISPLAY STEP:", safeStep);
-}
-
-function forceRestoreDraftContext() {
-  if (!window.GKFormApp) return;
-
-  const params = new URLSearchParams(window.location.search);
-  const forcedId = params.get("id");
-  const forcedStep = Number(params.get("step"));
-
-  if (forcedId) {
-    if (typeof window.GKFormApp.persistListingId === "function") {
-      window.GKFormApp.persistListingId(forcedId);
-    } else {
-      window.GKFormApp.state.listingId = forcedId;
-      window.GKFormApp.state.formData.listingId = forcedId;
-      sessionStorage.setItem("gk_listing_id", forcedId);
-    }
-  }
-
-  if (!Number.isNaN(forcedStep) && forcedStep > 0) {
-    window.GKFormApp.state.currentStep = forcedStep;
-    window.GKFormApp.state.formData.currentStep = forcedStep;
-    forceDisplayStep(forcedStep);
-  }
-
-  console.log("RESTORED ID:", window.GKFormApp.state.listingId);
-  console.log("RESTORED STEP:", window.GKFormApp.state.currentStep);
-}
-
 document.addEventListener("DOMContentLoaded", async () => {
-  if (!window.GKFormApp) return;
-
-  await window.GKFormApp.init();
-
-  setTimeout(forceRestoreDraftContext, 50);
-  setTimeout(forceRestoreDraftContext, 300);
-  setTimeout(forceRestoreDraftContext, 900);
+  if (window.GKFormApp) {
+    await window.GKFormApp.init();
+  }
 });
 
-window.addEventListener("load", () => {
-  setTimeout(forceRestoreDraftContext, 100);
-});
 console.log("GOTOKARMA FORM VERSION TEST 15");
