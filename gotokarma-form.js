@@ -1784,6 +1784,7 @@ window.GKFormApp = (() => {
   }
 
   function bindGlobalNavigation() {
+  function bindButtons() {
     const backBtn = document.querySelector(".btn-back");
     const nextBtn = document.querySelector(".btn-next");
     const saveQuitBtn = document.querySelector(".btn-save-quit");
@@ -1834,6 +1835,7 @@ window.GKFormApp = (() => {
         e.stopPropagation();
 
         try {
+          console.log("SAVE QUIT CLICKED");
           state.isExplicitlySaving = true;
           state.formData.currentStep = state.currentStep;
 
@@ -1867,6 +1869,10 @@ window.GKFormApp = (() => {
       });
     });
   }
+
+  bindButtons();
+  setTimeout(bindButtons, 300);
+}
 
   function hydrateCommonUI() {
     showDateFieldsByType(state.formData.dateType);
