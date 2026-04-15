@@ -80,6 +80,7 @@ window.GKFormApp = (() => {
       boostListing: false
     },
 
+    currentStep: 1,
     status: "draft"
   };
 
@@ -127,6 +128,10 @@ window.GKFormApp = (() => {
   const $ = (selector, scope = document) => scope.querySelector(selector);
   const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
 
+  function getQueryParam(name) {
+    return new URLSearchParams(window.location.search).get(name);
+  }
+
   function emit(name, detail = {}) {
     document.dispatchEvent(new CustomEvent(name, {
       detail: {
@@ -161,33 +166,32 @@ window.GKFormApp = (() => {
   }
 
   function saveStateToStorage() {
-    // volontairement vide :
-    // on garde l'état uniquement en mémoire tant que la page n'est pas rechargée
+    // volontairement vide
   }
 
   function loadStateFromStorage() {
-  state.formData = deepClone(DEFAULT_FORM_DATA);
-  state.currentStep = 1;
-  state.listingId = null;
-  state.isDirty = false;
-  state.isExplicitlySaving = false;
-}
+    state.formData = deepClone(DEFAULT_FORM_DATA);
+    state.currentStep = 1;
+    state.listingId = null;
+    state.isDirty = false;
+    state.isExplicitlySaving = false;
+  }
 
   function clearSavedDraftLocal() {
-  state.currentStep = 1;
-  state.listingId = null;
-  state.isDirty = false;
-  state.isExplicitlySaving = false;
-  state.editingAccommodationIndex = null;
-  state.editingDailyProgramIndex = null;
-  state.editingProgramDayIndex = null;
-  state.editingAddonIndex = null;
-  state.addressResults = [];
-  state.addressDebounce = null;
-  state.formData = deepClone(DEFAULT_FORM_DATA);
+    state.currentStep = 1;
+    state.listingId = null;
+    state.isDirty = false;
+    state.isExplicitlySaving = false;
+    state.editingAccommodationIndex = null;
+    state.editingDailyProgramIndex = null;
+    state.editingProgramDayIndex = null;
+    state.editingAddonIndex = null;
+    state.addressResults = [];
+    state.addressDebounce = null;
+    state.formData = deepClone(DEFAULT_FORM_DATA);
 
-  emit("gk:reset");
-}
+    emit("gk:reset");
+  }
 
   function updateProgress() {
     const fill = $(".fixed-step-progress-fill");
@@ -207,30 +211,32 @@ window.GKFormApp = (() => {
   }
 
   function showStep(step) {
-  const normalizedStep = Math.max(1, Math.min(TOTAL_STEPS, Number(step) || 1));
+    const normalizedStep = Math.max(1, Math.min(TOTAL_STEPS, Number(step) || 1));
 
-  $$('[class^="step-"]').forEach(el => {
-    el.style.display = "none";
-  });
-
-  const active = $(`.step-${normalizedStep}`);
-  if (active) {
-    active.style.display = "block";
-  }
-
-  state.currentStep = normalizedStep;
-  updateProgress();
-  saveStateToStorage();
-
-  requestAnimationFrame(() => {
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth"
+    $$('[class^="step-"]').forEach(el => {
+      el.style.display = "none";
     });
-  });
 
-  emit("gk:stepChanged", { step: normalizedStep });
-}
+    const active = $(`.step-${normalizedStep}`);
+    if (active) {
+      active.style.display = "block";
+    }
+
+    state.currentStep = normalizedStep;
+    state.formData.currentStep = normalizedStep;
+
+    updateProgress();
+    saveStateToStorage();
+
+    requestAnimationFrame(() => {
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth"
+      });
+    });
+
+    emit("gk:stepChanged", { step: normalizedStep });
+  }
 
   function nextStep() {
     if (state.currentStep < TOTAL_STEPS) {
@@ -343,36 +349,94 @@ window.GKFormApp = (() => {
     return { rawText, data };
   }
 
-  async function uploadImageToCloudinary(file) {
-  if (!file) {
-    throw new Error("Aucun fichier sélectionné.");
-  }
+  async function fetchOwnListing(listingId) {
+    const token = localStorage.getItem("accessToken");
 
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-  formData.append("folder", "gotokarma");
-
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
-    {
-      method: "POST",
-      body: formData
+    if (!token) {
+      window.location.href = "/login?redirect=/devenir-organisateur";
+      return;
     }
-  );
 
-  const data = await response.json();
+    const response = await fetch(
+      `https://flex-api.sharetribe.com/v1/api/own_listings/show?id=${encodeURIComponent(listingId)}`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": "bearer " + token,
+          "Accept": "application/json"
+        }
+      }
+    );
 
-  if (!response.ok) {
-    throw new Error(data?.error?.message || "Erreur lors de l’upload de l’image.");
+    const { rawText, data } = await parseResponseSafely(response);
+
+    if (!response.ok) {
+      const message =
+        data?.errors?.[0]?.title ||
+        data?.errors?.[0]?.detail ||
+        data?.error_description ||
+        data?.error ||
+        rawText ||
+        "Impossible de charger le draft";
+
+      throw new Error(message);
+    }
+
+    return data;
   }
 
-  return {
-    url: data.secure_url,
-    publicId: data.public_id,
-    name: file.name || ""
-  };
-}
+  function hydrateStateFromListingResponse(payload) {
+    const listing = payload?.data || {};
+    const attrs = listing?.attributes || {};
+    const publicData = attrs?.publicData || {};
+    const draftSnapshot = publicData?.draftSnapshot || {};
+
+    state.listingId = listing?.id?.uuid || listing?.id || null;
+
+    state.formData = mergeDeep(
+      deepClone(DEFAULT_FORM_DATA),
+      draftSnapshot
+    );
+
+    state.formData.title = draftSnapshot.title || attrs.title || state.formData.title || "";
+    state.formData.description = draftSnapshot.description || attrs.description || state.formData.description || "";
+    state.formData.status = draftSnapshot.status || publicData.status || "draft";
+    state.formData.currentStep = Number(draftSnapshot.currentStep || publicData.currentStep || 1) || 1;
+
+    state.currentStep = state.formData.currentStep;
+    state.isDirty = false;
+  }
+
+  async function uploadImageToCloudinary(file) {
+    if (!file) {
+      throw new Error("Aucun fichier sélectionné.");
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    formData.append("folder", "gotokarma");
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+      {
+        method: "POST",
+        body: formData
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data?.error?.message || "Erreur lors de l’upload de l’image.");
+    }
+
+    return {
+      url: data.secure_url,
+      publicId: data.public_id,
+      name: file.name || ""
+    };
+  }
 
   async function createListingDraft(primaryCategory = null) {
     const token = localStorage.getItem("accessToken");
@@ -390,13 +454,13 @@ window.GKFormApp = (() => {
         "Accept": "application/json"
       },
       body: JSON.stringify({
-  title: state.formData.title || "Brouillon",
-  description: state.formData.description || "Draft en cours de création",
-  publicData: {
-    primaryCategory: primaryCategory || state.formData.categories[0] || null,
-    ...buildCleanPublicData()
-  }
-})
+        title: state.formData.title || "Brouillon",
+        description: state.formData.description || "Draft en cours de création",
+        publicData: {
+          primaryCategory: primaryCategory || state.formData.categories[0] || null,
+          ...buildCleanPublicData()
+        }
+      })
     });
 
     const { rawText, data } = await parseResponseSafely(response);
@@ -472,69 +536,66 @@ window.GKFormApp = (() => {
     return data;
   }
 
-async function syncDraft(extra = {}) {
-  const cleanPublicData = buildCleanPublicData();
+  async function syncDraft(extra = {}) {
+    const cleanPublicData = buildCleanPublicData();
 
-  return updateListingDraft({
-    title: state.formData.title || "Brouillon",
-    description: state.formData.description || "Draft en cours de création",
-    publicData: {
-      primaryCategory: state.formData.categories[0] || null,
-      ...cleanPublicData
-    },
-    ...extra
-  });
-}
-
-
-
-  async function publishDraft() {
-  const token = localStorage.getItem("accessToken");
-
-  if (!token) {
-    window.location.href = "/login?redirect=/devenir-organisateur";
-    return;
+    return updateListingDraft({
+      title: state.formData.title || "Brouillon",
+      description: state.formData.description || "Draft en cours de création",
+      publicData: {
+        primaryCategory: state.formData.categories[0] || null,
+        ...cleanPublicData
+      },
+      ...extra
+    });
   }
+    async function publishDraft() {
+    const token = localStorage.getItem("accessToken");
 
-  if (!state.listingId) {
-    throw new Error("Listing ID manquant");
+    if (!token) {
+      window.location.href = "/login?redirect=/devenir-organisateur";
+      return;
+    }
+
+    if (!state.listingId) {
+      throw new Error("Listing ID manquant");
+    }
+
+    const response = await fetch("https://flex-api.sharetribe.com/v1/api/own_listings/publish_draft", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "bearer " + token,
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        id: state.listingId
+      })
+    });
+
+    const { rawText, data } = await parseResponseSafely(response);
+
+    if (!response.ok) {
+      const message =
+        data?.errors?.[0]?.title ||
+        data?.errors?.[0]?.detail ||
+        data?.error_description ||
+        data?.error ||
+        rawText ||
+        "Impossible de publier le draft";
+
+      throw new Error(message);
+    }
+
+    state.formData.status = "published";
+    saveStateToStorage();
+
+    emit("gk:draftPublished", {
+      response: data
+    });
+
+    return data;
   }
-
-  const response = await fetch("https://flex-api.sharetribe.com/v1/api/own_listings/publish_draft", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "bearer " + token,
-      "Accept": "application/json"
-    },
-    body: JSON.stringify({
-      id: state.listingId
-    })
-  });
-
-  const { rawText, data } = await parseResponseSafely(response);
-
-  if (!response.ok) {
-    const message =
-      data?.errors?.[0]?.title ||
-      data?.errors?.[0]?.detail ||
-      data?.error_description ||
-      data?.error ||
-      rawText ||
-      "Impossible de publier le draft";
-
-    throw new Error(message);
-  }
-
-  state.formData.status = "published";
-  saveStateToStorage();
-
-  emit("gk:draftPublished", {
-    response: data
-  });
-
-  return data;
-}
 
   async function searchAddress(query) {
     const url =
@@ -815,32 +876,32 @@ async function syncDraft(extra = {}) {
   }
 
   function addAccommodationImage(image) {
-  const cleanUrl =
-    typeof image === "string"
-      ? image.trim()
-      : (image?.url || "").trim();
+    const cleanUrl =
+      typeof image === "string"
+        ? image.trim()
+        : (image?.url || "").trim();
 
-  if (!cleanUrl) return false;
-  if (state.editingAccommodationIndex === null) return false;
+    if (!cleanUrl) return false;
+    if (state.editingAccommodationIndex === null) return false;
 
-  const accommodation = state.formData.accommodations[state.editingAccommodationIndex];
-  if (!accommodation) return false;
+    const accommodation = state.formData.accommodations[state.editingAccommodationIndex];
+    if (!accommodation) return false;
 
-  if (!Array.isArray(accommodation.images)) {
-    accommodation.images = [];
+    if (!Array.isArray(accommodation.images)) {
+      accommodation.images = [];
+    }
+
+    accommodation.images.push({
+      url: cleanUrl,
+      publicId: image?.publicId || "",
+      name: image?.name || ""
+    });
+
+    markDirty();
+    emit("gk:accommodationImagesChanged", { index: state.editingAccommodationIndex });
+
+    return true;
   }
-
-  accommodation.images.push({
-    url: cleanUrl,
-    publicId: image?.publicId || "",
-    name: image?.name || ""
-  });
-
-  markDirty();
-  emit("gk:accommodationImagesChanged", { index: state.editingAccommodationIndex });
-
-  return true;
-}
 
   function removeAccommodationImage(imageIndex) {
     if (state.editingAccommodationIndex === null) return;
@@ -852,69 +913,67 @@ async function syncDraft(extra = {}) {
     markDirty();
     emit("gk:accommodationImagesChanged", { index: state.editingAccommodationIndex });
   }
+    async function saveCurrentAccommodation(stepEl) {
+    const accommodationName = $("#accommodation-name")?.value.trim() || "";
+    const accommodationType = $("#accommodation-type")?.value || "";
+    const accommodationCapacity = $("#accommodation-capacity")?.value || "";
+    const pricingType = $("#pricing-type")?.value || "";
+    const accommodationPrice = $("#accommodation-price")?.value || "";
+    const accommodationDescription = $("#accommodation-description")?.value.trim() || "";
 
- async function saveCurrentAccommodation(stepEl) {
-  const accommodationName = $("#accommodation-name")?.value.trim() || "";
-  const accommodationType = $("#accommodation-type")?.value || "";
-  const accommodationCapacity = $("#accommodation-capacity")?.value || "";
-  const pricingType = $("#pricing-type")?.value || "";
-  const accommodationPrice = $("#accommodation-price")?.value || "";
-  const accommodationDescription = $("#accommodation-description")?.value.trim() || "";
-
-  if (!accommodationName || !accommodationType || !accommodationCapacity || !pricingType || !accommodationPrice) {
-    showError(stepEl, "Merci de remplir tous les champs du logement.");
-    return false;
-  }
-
-  const previousAccommodations = deepClone(state.formData.accommodations);
-  const previousEditingIndex = state.editingAccommodationIndex;
-
-  const existingImages =
-    state.editingAccommodationIndex !== null
-      ? (state.formData.accommodations[state.editingAccommodationIndex]?.images || [])
-      : [];
-
-  const newAccommodation = {
-    name: accommodationName,
-    type: accommodationType,
-    capacity: accommodationCapacity,
-    pricingType,
-    price: accommodationPrice,
-    description: accommodationDescription,
-    facilities: [...state.formData.accommodationFacilities],
-    customFacilities: [...state.formData.customAccommodationFacilities],
-    images: existingImages
-  };
-
-  try {
-    if (state.editingAccommodationIndex !== null) {
-      state.formData.accommodations[state.editingAccommodationIndex] = newAccommodation;
-    } else {
-      state.formData.accommodations.push(newAccommodation);
+    if (!accommodationName || !accommodationType || !accommodationCapacity || !pricingType || !accommodationPrice) {
+      showError(stepEl, "Merci de remplir tous les champs du logement.");
+      return false;
     }
 
-    markDirty();
+    const previousAccommodations = deepClone(state.formData.accommodations);
+    const previousEditingIndex = state.editingAccommodationIndex;
 
-    if (!state.listingId) {
-      throw new Error("Listing ID manquant");
+    const existingImages =
+      state.editingAccommodationIndex !== null
+        ? (state.formData.accommodations[state.editingAccommodationIndex]?.images || [])
+        : [];
+
+    const newAccommodation = {
+      name: accommodationName,
+      type: accommodationType,
+      capacity: accommodationCapacity,
+      pricingType,
+      price: accommodationPrice,
+      description: accommodationDescription,
+      facilities: [...state.formData.accommodationFacilities],
+      customFacilities: [...state.formData.customAccommodationFacilities],
+      images: existingImages
+    };
+
+    try {
+      if (state.editingAccommodationIndex !== null) {
+        state.formData.accommodations[state.editingAccommodationIndex] = newAccommodation;
+      } else {
+        state.formData.accommodations.push(newAccommodation);
+      }
+
+      markDirty();
+
+      if (!state.listingId) {
+        throw new Error("Listing ID manquant");
+      }
+
+      await syncDraft();
+
+      emit("gk:accommodationListChanged");
+      resetAccommodationFormUI();
+
+      return true;
+    } catch (error) {
+      state.formData.accommodations = previousAccommodations;
+      state.editingAccommodationIndex = previousEditingIndex;
+
+      emit("gk:accommodationListChanged");
+
+      throw error;
     }
-
-    await syncDraft();
-
-    emit("gk:accommodationListChanged");
-    resetAccommodationFormUI();
-
-    return true;
-  } catch (error) {
-    // rollback si la sauvegarde échoue
-    state.formData.accommodations = previousAccommodations;
-    state.editingAccommodationIndex = previousEditingIndex;
-
-    emit("gk:accommodationListChanged");
-
-    throw error;
   }
-}
 
   async function deleteAccommodation(index) {
     state.formData.accommodations.splice(index, 1);
@@ -1127,25 +1186,25 @@ async function syncDraft(extra = {}) {
   }
 
   function addListingImage(image) {
-  const cleanUrl =
-    typeof image === "string"
-      ? image.trim()
-      : (image?.url || "").trim();
+    const cleanUrl =
+      typeof image === "string"
+        ? image.trim()
+        : (image?.url || "").trim();
 
-  if (!cleanUrl) return false;
+    if (!cleanUrl) return false;
 
-  const imageObject = {
-    url: cleanUrl,
-    publicId: image?.publicId || "",
-    name: image?.name || ""
-  };
+    const imageObject = {
+      url: cleanUrl,
+      publicId: image?.publicId || "",
+      name: image?.name || ""
+    };
 
-  state.formData.images.push(imageObject);
-  markDirty();
-  emit("gk:listingImagesChanged");
+    state.formData.images.push(imageObject);
+    markDirty();
+    emit("gk:listingImagesChanged");
 
-  return true;
-}
+    return true;
+  }
 
   function removeListingImage(index) {
     state.formData.images.splice(index, 1);
@@ -1228,8 +1287,7 @@ async function syncDraft(extra = {}) {
     markDirty();
     emit("gk:addonsChanged");
   }
-
-  function setCancellationPolicy(value) {
+    function setCancellationPolicy(value) {
     state.formData.cancellationPolicy = value || "";
     markDirty();
     emit("gk:cancellationPolicyChanged", { value: state.formData.cancellationPolicy });
@@ -1354,207 +1412,221 @@ async function syncDraft(extra = {}) {
   }
 
   function slugify(value) {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function toNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const num = Number(String(value).replace(",", ".").replace(/[^\d.-]/g, ""));
-  return Number.isNaN(num) ? null : num;
-}
-
-function getCleanDates(formData) {
-  let start = "";
-  let end = "";
-
-  if (formData.dateType === "one_time") {
-    start = formData.oneTimeStart || "";
-    end = formData.oneTimeEnd || "";
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
   }
 
-  if (formData.dateType === "multiple_dates") {
-    start = formData.multipleDates?.[0]?.start || "";
-    end = formData.multipleDates?.[0]?.end || "";
+  function toNumber(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const num = Number(String(value).replace(",", ".").replace(/[^\d.-]/g, ""));
+    return Number.isNaN(num) ? null : num;
   }
 
-  if (formData.dateType === "period") {
-    start = formData.periodStart || "";
-    end = formData.periodEnd || "";
-  }
+  function getCleanDates(formData) {
+    let start = "";
+    let end = "";
 
-  if (formData.dateType === "recurring") {
-    start = formData.recurringStart || "";
-    end = formData.recurringEnd || "";
-  }
-
-  let durationDays = null;
-  let durationNights = null;
-
-  if (start && end) {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-
-    if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())) {
-      const diffMs = endDate.getTime() - startDate.getTime();
-      const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      durationDays = days > 0 ? days : 1;
-      durationNights = Math.max(durationDays - 1, 1);
+    if (formData.dateType === "one_time") {
+      start = formData.oneTimeStart || "";
+      end = formData.oneTimeEnd || "";
     }
+
+    if (formData.dateType === "multiple_dates") {
+      start = formData.multipleDates?.[0]?.start || "";
+      end = formData.multipleDates?.[0]?.end || "";
+    }
+
+    if (formData.dateType === "period") {
+      start = formData.periodStart || "";
+      end = formData.periodEnd || "";
+    }
+
+    if (formData.dateType === "recurring") {
+      start = formData.recurringStart || "";
+      end = formData.recurringEnd || "";
+    }
+
+    let durationDays = null;
+    let durationNights = null;
+
+    if (start && end) {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+
+      if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())) {
+        const diffMs = endDate.getTime() - startDate.getTime();
+        const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        durationDays = days > 0 ? days : 1;
+        durationNights = Math.max(durationDays - 1, 1);
+      }
+    }
+
+    return {
+      type: formData.dateType || "",
+      start,
+      end,
+      durationDays,
+      durationNights
+    };
   }
 
-  return {
-    type: formData.dateType || "",
-    start,
-    end,
-    durationDays,
-    durationNights
-  };
-}
+  function buildCleanPublicData() {
+    const formData = state.formData;
+    const cleanDates = getCleanDates(formData);
 
-function buildCleanPublicData() {
-  const formData = state.formData;
-  const cleanDates = getCleanDates(formData);
+    const cleanAccommodations = (formData.accommodations || []).map(acc => ({
+      name: acc.name || "",
+      type: acc.type || "",
+      capacity: toNumber(acc.capacity),
+      pricingType: acc.pricingType || "",
+      price: toNumber(acc.price),
+      currency: "EUR",
+      facilities: Array.isArray(acc.facilities) ? acc.facilities : [],
+      description: acc.description || "",
+      images: Array.isArray(acc.images)
+        ? acc.images
+            .map(img => {
+              if (typeof img === "string") return { url: img };
+              if (img && typeof img.url === "string") return { url: img.url };
+              return null;
+            })
+            .filter(Boolean)
+        : []
+    }));
 
-  const cleanAccommodations = (formData.accommodations || []).map(acc => ({
-    name: acc.name || "",
-    type: acc.type || "",
-    capacity: toNumber(acc.capacity),
-    pricingType: acc.pricingType || "",
-    price: toNumber(acc.price),
-    currency: "EUR",
-    facilities: Array.isArray(acc.facilities) ? acc.facilities : [],
-    description: acc.description || "",
-    images: Array.isArray(acc.images)
-      ? acc.images
+    const cleanAddons = (formData.addons || []).map(addon => ({
+      name: addon.name || "",
+      price: toNumber(addon.price),
+      currency: "EUR",
+      description: addon.description || ""
+    }));
+
+    const cleanProgram =
+      formData.programMode === "same_each_day"
+        ? [
+            {
+              dayTitle: "Programme type",
+              activities: Array.isArray(formData.dailyProgramItems)
+                ? formData.dailyProgramItems.map(item => ({
+                    time: item.time || "",
+                    title: item.title || "",
+                    description: item.description || ""
+                  }))
+                : []
+            }
+          ]
+        : Array.isArray(formData.programDays)
+          ? formData.programDays.map(day => ({
+              dayTitle: day.dayTitle || "",
+              activities: Array.isArray(day.activities)
+                ? day.activities.map(item => ({
+                    time: item.time || "",
+                    title: item.title || "",
+                    description: item.description || ""
+                  }))
+                : []
+            }))
+          : [];
+
+    const included = Array.isArray(formData.includedOptions)
+      ? formData.includedOptions
+      : [];
+
+    const excluded = [
+      "Transport jusqu’au lieu",
+      "Assurance voyage",
+      "Dépenses personnelles"
+    ];
+
+    const cleanListingImages = Array.isArray(formData.images)
+      ? formData.images
           .map(img => {
             if (typeof img === "string") return { url: img };
             if (img && typeof img.url === "string") return { url: img.url };
             return null;
           })
           .filter(Boolean)
-      : []
-  }));
+      : [];
 
-  const cleanAddons = (formData.addons || []).map(addon => ({
-    name: addon.name || "",
-    price: toNumber(addon.price),
-    currency: "EUR",
-    description: addon.description || ""
-  }));
+    const snapshot = deepClone(formData);
+    snapshot.currentStep = state.currentStep || formData.currentStep || 1;
 
-  const cleanProgram =
-    formData.programMode === "same_each_day"
-      ? [
-          {
-            dayTitle: "Programme type",
-            activities: Array.isArray(formData.dailyProgramItems)
-              ? formData.dailyProgramItems.map(item => ({
-                  time: item.time || "",
-                  title: item.title || "",
-                  description: item.description || ""
-                }))
-              : []
-          }
-        ]
-      : Array.isArray(formData.programDays)
-        ? formData.programDays.map(day => ({
-            dayTitle: day.dayTitle || "",
-            activities: Array.isArray(day.activities)
-              ? day.activities.map(item => ({
-                  time: item.time || "",
-                  title: item.title || "",
-                  description: item.description || ""
-                }))
-              : []
-          }))
-        : [];
+    return {
+      title: formData.title || "",
+      slug: slugify(formData.title || ""),
+      status: formData.status === "published" ? "pending_review" : "draft",
+      currentStep: state.currentStep || formData.currentStep || 1,
+      draftSnapshot: snapshot,
 
-  const included = Array.isArray(formData.includedOptions)
-    ? formData.includedOptions
-    : [];
+      categories: Array.isArray(formData.categories) ? formData.categories : [],
 
-  const excluded = [
-    "Transport jusqu’au lieu",
-    "Assurance voyage",
-    "Dépenses personnelles"
-  ];
+      address: formData.address || "",
+      addressLat: formData.addressLat ?? null,
+      addressLng: formData.addressLng ?? null,
 
-  const cleanListingImages = Array.isArray(formData.images)
-    ? formData.images
-        .map(img => {
-          if (typeof img === "string") return { url: img };
-          if (img && typeof img.url === "string") return { url: img.url };
-          return null;
-        })
-        .filter(Boolean)
-    : [];
+      dates: cleanDates,
 
-  return {
-    title: formData.title || "",
-    slug: slugify(formData.title || ""),
-    status: formData.status === "published" ? "pending_review" : "draft",
+      heroImage: cleanListingImages.length ? cleanListingImages[0].url : "",
+      images: cleanListingImages,
 
-    categories: Array.isArray(formData.categories) ? formData.categories : [],
+      description: formData.description || "",
 
-    address: formData.address || "",
-    addressLat: formData.addressLat ?? null,
-    addressLng: formData.addressLng ?? null,
+      included,
+      excluded,
 
-    dates: cleanDates,
+      accommodations: cleanAccommodations,
+      addons: cleanAddons,
+      program: cleanProgram,
 
-    heroImage: cleanListingImages.length ? cleanListingImages[0].url : "",
-    images: cleanListingImages,
+      practices: [],
 
-    description: formData.description || "",
+      experienceLevel: formData.experienceLevel || "",
 
-    included,
-    excluded,
+      food: {
+        mealsIncluded: !!formData.food?.mealsIncluded,
+        mealTypes: Array.isArray(formData.food?.mealTypes) ? formData.food.mealTypes : [],
+        drinksIncluded: !!formData.food?.drinksIncluded,
+        dietOptions: Array.isArray(formData.food?.dietOptions) ? formData.food.dietOptions : [],
+        customDietOptions: Array.isArray(formData.food?.customDietOptions) ? formData.food.customDietOptions : []
+      },
 
-    accommodations: cleanAccommodations,
-    addons: cleanAddons,
-    program: cleanProgram,
+      travel: {
+        howToGetThere: formData.travelLogistics?.howToGetThere || "",
+        recommendedTransport: formData.travelLogistics?.recommendedTransport || "",
+        pickupAvailable: !!formData.travelLogistics?.pickupAvailable,
+        pickupDetails: formData.travelLogistics?.pickupDetails || ""
+      },
 
-    practices: [],
+      locationDetails: {
+        description: formData.locationDetails?.description || "",
+        facilities: Array.isArray(formData.locationDetails?.facilities) ? formData.locationDetails.facilities : [],
+        customFacilities: Array.isArray(formData.locationDetails?.customFacilities) ? formData.locationDetails.customFacilities : []
+      },
 
-    experienceLevel: formData.experienceLevel || "",
+      cancellationPolicy: formData.cancellationPolicy || "",
 
-    food: {
-      mealsIncluded: !!formData.food?.mealsIncluded,
-      mealTypes: Array.isArray(formData.food?.mealTypes) ? formData.food.mealTypes : [],
-      drinksIncluded: !!formData.food?.drinksIncluded,
-      dietOptions: Array.isArray(formData.food?.dietOptions) ? formData.food.dietOptions : [],
-      customDietOptions: Array.isArray(formData.food?.customDietOptions) ? formData.food.customDietOptions : []
-    },
+      organizer: {
+        name: formData.organizer?.name || "",
+        bio: formData.organizer?.bio || "",
+        experience: formData.organizer?.experience || "",
+        photo: formData.organizer?.photo || ""
+      },
 
-    travel: {
-      recommendedTransport: formData.travelLogistics?.recommendedTransport || ""
-    },
-
-    cancellationPolicy: formData.cancellationPolicy || "",
-
-    organizer: {
-      name: formData.organizer?.name || "",
-      bio: formData.organizer?.bio || "",
-      experience: formData.organizer?.experience || "",
-      photo: formData.organizer?.photo || ""
-    },
-
-    visibilityPlan: {
-      commissionPercent: toNumber(formData.businessSettings?.commissionPercent),
-      label:
-        String(formData.businessSettings?.commissionPercent || "") === "15"
-          ? "premium"
-          : String(formData.businessSettings?.commissionPercent || "") === "10"
-            ? "boost"
-            : "essential"
-    }
-  };
-}
+      visibilityPlan: {
+        commissionPercent: toNumber(formData.businessSettings?.commissionPercent),
+        label:
+          String(formData.businessSettings?.commissionPercent || "") === "15"
+            ? "premium"
+            : String(formData.businessSettings?.commissionPercent || "") === "10"
+              ? "boost"
+              : "essential"
+      }
+    };
+  }
 
   function getReviewData() {
     return {
@@ -1676,8 +1748,7 @@ function buildCleanPublicData() {
     }
     return null;
   }
-
-  function getStepValidator(step) {
+    function getStepValidator(step) {
     const validators = {
       1: validateStep1,
       2: validateStep2,
@@ -1713,73 +1784,121 @@ function buildCleanPublicData() {
   }
 
   function bindGlobalNavigation() {
-  const backBtn = document.querySelector(".btn-back");
-  const nextBtn = document.querySelector(".btn-next");
+    const backBtn = document.querySelector(".btn-back");
+    const nextBtn = document.querySelector(".btn-next");
+    const saveQuitBtn = document.querySelector(".btn-save-quit");
 
-  if (backBtn && backBtn.dataset.gkBackBound !== "true") {
-    backBtn.dataset.gkBackBound = "true";
+    if (backBtn && backBtn.dataset.gkBackBound !== "true") {
+      backBtn.dataset.gkBackBound = "true";
 
-    backBtn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+      backBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
 
-      const handled = await runStepAction(state.currentStep, "back");
-      if (handled === false) return;
+        const handled = await runStepAction(state.currentStep, "back");
+        if (handled === false) return;
 
-      prevStep();
+        prevStep();
+      });
+    }
+
+    if (nextBtn && nextBtn.dataset.gkNextBound !== "true") {
+      nextBtn.dataset.gkNextBound = "true";
+
+      nextBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const handled = await runStepAction(state.currentStep, "next");
+
+        if (handled === false) return;
+        if (handled === true) return;
+
+        const currentStepEl = getCurrentStepElement();
+        const validationError = validateCurrentStep();
+
+        if (validationError) {
+          showError(currentStepEl, validationError);
+          return;
+        }
+
+        nextStep();
+      });
+    }
+
+    if (saveQuitBtn && saveQuitBtn.dataset.gkSaveQuitBound !== "true") {
+      saveQuitBtn.dataset.gkSaveQuitBound = "true";
+
+      saveQuitBtn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        try {
+          state.isExplicitlySaving = true;
+          state.formData.currentStep = state.currentStep;
+
+          if (!state.listingId) {
+            await createListingDraft(state.formData.categories[0] || null);
+          }
+
+          await syncDraft();
+          markClean();
+
+          window.location.href = "/dashboard?tab=announcements";
+        } catch (error) {
+          console.error("SAVE & QUIT ERROR:", error);
+          alert(error.message || "Erreur lors de l’enregistrement.");
+        } finally {
+          state.isExplicitlySaving = false;
+        }
+      });
+    }
+
+    $$(".btn-go-step").forEach(btn => {
+      if (btn.dataset.gkGoStepBound === "true") return;
+      btn.dataset.gkGoStepBound = "true";
+
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const step = Number(btn.getAttribute("data-step"));
+        if (!step) return;
+        goToStep(step);
+      });
     });
   }
-
-  if (nextBtn && nextBtn.dataset.gkNextBound !== "true") {
-    nextBtn.dataset.gkNextBound = "true";
-
-    nextBtn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const handled = await runStepAction(state.currentStep, "next");
-
-      if (handled === false) return;
-      if (handled === true) return;
-
-      const currentStepEl = getCurrentStepElement();
-      const validationError = validateCurrentStep();
-
-      if (validationError) {
-        showError(currentStepEl, validationError);
-        return;
-      }
-
-      nextStep();
-    });
-  }
-
-  $$(".btn-go-step").forEach(btn => {
-    if (btn.dataset.gkGoStepBound === "true") return;
-    btn.dataset.gkGoStepBound = "true";
-
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const step = Number(btn.getAttribute("data-step"));
-      if (!step) return;
-      goToStep(step);
-    });
-  });
-}
 
   function hydrateCommonUI() {
     showDateFieldsByType(state.formData.dateType);
     showProgramModeFields(state.formData.programMode);
   }
 
-  function init() {
+  async function init() {
     loadStateFromStorage();
+
+    const listingIdFromUrl = getQueryParam("id");
+    const stepFromUrl = Number(getQueryParam("step"));
+
+    if (listingIdFromUrl) {
+      try {
+        const listingData = await fetchOwnListing(listingIdFromUrl);
+        hydrateStateFromListingResponse(listingData);
+      } catch (error) {
+        console.error("GK INIT LOAD ERROR:", error);
+      }
+    }
+
     bindGlobalNavigation();
     bindAutoClearErrors();
     bindBeforeUnloadProtection();
     hydrateCommonUI();
-    showStep(state.currentStep);
+
+    const initialStep =
+      !Number.isNaN(stepFromUrl) && stepFromUrl > 0
+        ? stepFromUrl
+        : Number(state.formData.currentStep || state.currentStep || 1) || 1;
+
+    showStep(initialStep);
 
     emit("gk:ready");
   }
@@ -1892,8 +2011,8 @@ function buildCleanPublicData() {
   };
 })();
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   if (window.GKFormApp) {
-    window.GKFormApp.init();
+    await window.GKFormApp.init();
   }
 });
