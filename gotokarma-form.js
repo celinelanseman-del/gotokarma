@@ -1867,35 +1867,39 @@ window.GKFormApp = (() => {
     showProgramModeFields(state.formData.programMode);
   }
 
-  async function init() {
-    loadStateFromStorage();
+async function init() {
+  loadStateFromStorage();
 
-    const listingIdFromUrl = getQueryParam("id");
-    const stepFromUrl = Number(getQueryParam("step"));
+  const listingIdFromUrl = getQueryParam("id");
+  const stepFromUrl = Number(getQueryParam("step"));
 
-    if (listingIdFromUrl) {
-      try {
-        const listingData = await fetchOwnListing(listingIdFromUrl);
-        hydrateStateFromListingResponse(listingData);
-      } catch (error) {
-        console.error("GK INIT LOAD ERROR:", error);
-      }
-    }
-
-    bindGlobalNavigation();
-    bindAutoClearErrors();
-    bindBeforeUnloadProtection();
-    hydrateCommonUI();
-
-    const initialStep =
-      !Number.isNaN(stepFromUrl) && stepFromUrl > 0
-        ? stepFromUrl
-        : Number(state.formData.currentStep || state.currentStep || 1) || 1;
-
-    showStep(initialStep);
-
-    emit("gk:ready");
+  if (listingIdFromUrl) {
+    state.listingId = listingIdFromUrl;
   }
+
+  if (listingIdFromUrl) {
+    try {
+      const listingData = await fetchOwnListing(listingIdFromUrl);
+      hydrateStateFromListingResponse(listingData);
+    } catch (error) {
+      console.error("GK INIT LOAD ERROR:", error);
+    }
+  }
+
+  bindGlobalNavigation();
+  bindAutoClearErrors();
+  bindBeforeUnloadProtection();
+  hydrateCommonUI();
+
+  const initialStep =
+    !Number.isNaN(stepFromUrl) && stepFromUrl > 0
+      ? stepFromUrl
+      : Number(state.formData.currentStep || state.currentStep || 1) || 1;
+
+  showStep(initialStep);
+
+  emit("gk:ready");
+}
 
   return {
     state,
