@@ -508,49 +508,56 @@ window.GKFormApp = (() => {
   }
 
     async function createListingDraft(primaryCategory = null) {
-    const response = await fetchWithAuthRetry(
-      "https://flex-api.sharetribe.com/v1/api/own_listings/create_draft",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          title: state.formData.title || "Brouillon",
-          description: state.formData.description || "Draft en cours de création",
-          publicData: {
-            primaryCategory: primaryCategory || state.formData.categories[0] || null,
-            ...buildCleanPublicData()
-          }
-        })
-      }
-    );
+  const listingIdFromUrl = getQueryParam("id");
 
-    const { rawText, data } = await parseResponseSafely(response);
-
-    if (!response.ok) {
-      const message =
-        data?.errors?.[0]?.title ||
-        data?.errors?.[0]?.detail ||
-        data?.error_description ||
-        data?.error ||
-        rawText ||
-        "Impossible de créer le draft";
-
-      throw new Error(message);
-    }
-
-    state.listingId = data?.data?.id?.uuid || data?.data?.id || null;
-    markDirty();
-
-    emit("gk:draftCreated", {
-      listingId: state.listingId,
-      response: data
-    });
-
-    return state.listingId;
+  if (!state.listingId && listingIdFromUrl) {
+    state.listingId = listingIdFromUrl;
+    return listingIdFromUrl;
   }
+
+  const response = await fetchWithAuthRetry(
+    "https://flex-api.sharetribe.com/v1/api/own_listings/create_draft",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        title: state.formData.title || "Brouillon",
+        description: state.formData.description || "Draft en cours de création",
+        publicData: {
+          primaryCategory: primaryCategory || state.formData.categories[0] || null,
+          ...buildCleanPublicData()
+        }
+      })
+    }
+  );
+
+  const { rawText, data } = await parseResponseSafely(response);
+
+  if (!response.ok) {
+    const message =
+      data?.errors?.[0]?.title ||
+      data?.errors?.[0]?.detail ||
+      data?.error_description ||
+      data?.error ||
+      rawText ||
+      "Impossible de créer le draft";
+
+    throw new Error(message);
+  }
+
+  state.listingId = data?.data?.id?.uuid || data?.data?.id || null;
+  markDirty();
+
+  emit("gk:draftCreated", {
+    listingId: state.listingId,
+    response: data
+  });
+
+  return state.listingId;
+}
 
     async function updateListingDraft(dataToUpdate = {}) {
     if (!state.listingId) {
@@ -596,18 +603,29 @@ window.GKFormApp = (() => {
   }
 
   async function syncDraft(extra = {}) {
-    const cleanPublicData = buildCleanPublicData();
-
-    return updateListingDraft({
-      title: state.formData.title || "Brouillon",
-      description: state.formData.description || "Draft en cours de création",
-      publicData: {
-        primaryCategory: state.formData.categories[0] || null,
-        ...cleanPublicData
-      },
-      ...extra
-    });
+  if (!state.listingId) {
+    const listingIdFromUrl = getQueryParam("id");
+    if (listingIdFromUrl) {
+      state.listingId = listingIdFromUrl;
+    }
   }
+
+  if (!state.listingId) {
+    throw new Error("Listing ID toujours manquant (syncDraft)");
+  }
+
+  const cleanPublicData = buildCleanPublicData();
+
+  return updateListingDraft({
+    title: state.formData.title || "Brouillon",
+    description: state.formData.description || "Draft en cours de création",
+    publicData: {
+      primaryCategory: state.formData.categories[0] || null,
+      ...cleanPublicData
+    },
+    ...extra
+  });
+}
     async function publishDraft() {
     const token = localStorage.getItem("accessToken");
 
@@ -1940,14 +1958,15 @@ async function init() {
 
   if (listingIdFromUrl) {
     state.listingId = listingIdFromUrl;
-  }
 
-  if (listingIdFromUrl) {
     try {
       const listingData = await fetchOwnListing(listingIdFromUrl);
       hydrateStateFromListingResponse(listingData);
     } catch (error) {
       console.error("GK INIT LOAD ERROR:", error);
+
+      // on garde quand même l'id présent dans l'URL
+      state.listingId = listingIdFromUrl;
     }
   }
 
