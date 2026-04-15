@@ -9,6 +9,8 @@ window.GKFormApp = (() => {
 
     title: "",
 
+    listingId: null,
+
     address: "",
     addressLat: null,
     addressLng: null,
@@ -132,6 +134,28 @@ window.GKFormApp = (() => {
     return new URLSearchParams(window.location.search).get(name);
   }
 
+  function getEffectiveListingId() {
+  return (
+    state.listingId ||
+    state.formData.listingId ||
+    getQueryParam("id") ||
+    sessionStorage.getItem("gk_listing_id") ||
+    null
+  );
+}
+
+function persistListingId(listingId) {
+  if (!listingId) return;
+
+  state.listingId = listingId;
+  state.formData.listingId = listingId;
+  sessionStorage.setItem("gk_listing_id", listingId);
+
+  const url = new URL(window.location.href);
+  url.searchParams.set("id", listingId);
+  window.history.replaceState({}, "", url.toString());
+}
+
   function emit(name, detail = {}) {
     document.dispatchEvent(new CustomEvent(name, {
       detail: {
@@ -170,12 +194,21 @@ window.GKFormApp = (() => {
   }
 
   function loadStateFromStorage() {
-    state.formData = deepClone(DEFAULT_FORM_DATA);
-    state.currentStep = 1;
-    state.listingId = null;
-    state.isDirty = false;
-    state.isExplicitlySaving = false;
+  state.formData = deepClone(DEFAULT_FORM_DATA);
+  state.currentStep = 1;
+  state.listingId = null;
+  state.isDirty = false;
+  state.isExplicitlySaving = false;
+
+  const listingIdFromUrl = getQueryParam("id");
+  const listingIdFromSession = sessionStorage.getItem("gk_listing_id");
+  const effectiveId = listingIdFromUrl || listingIdFromSession || null;
+
+  if (effectiveId) {
+    state.listingId = effectiveId;
+    state.formData.listingId = effectiveId;
   }
+}
 
   function clearSavedDraftLocal() {
     state.currentStep = 1;
@@ -460,26 +493,30 @@ window.GKFormApp = (() => {
   }
 
   function hydrateStateFromListingResponse(payload) {
-    const listing = payload?.data || {};
-    const attrs = listing?.attributes || {};
-    const publicData = attrs?.publicData || {};
-    const draftSnapshot = publicData?.draftSnapshot || {};
+  const listing = payload?.data || {};
+  const attrs = listing?.attributes || {};
+  const publicData = attrs?.publicData || {};
+  const draftSnapshot = publicData?.draftSnapshot || {};
 
-    state.listingId = listing?.id?.uuid || listing?.id || null;
-
-    state.formData = mergeDeep(
-      deepClone(DEFAULT_FORM_DATA),
-      draftSnapshot
-    );
-
-    state.formData.title = draftSnapshot.title || attrs.title || state.formData.title || "";
-    state.formData.description = draftSnapshot.description || attrs.description || state.formData.description || "";
-    state.formData.status = draftSnapshot.status || publicData.status || "draft";
-    state.formData.currentStep = Number(draftSnapshot.currentStep || publicData.currentStep || 1) || 1;
-
-    state.currentStep = state.formData.currentStep;
-    state.isDirty = false;
+  const listingId = listing?.id?.uuid || listing?.id || null;
+  if (listingId) {
+    persistListingId(listingId);
   }
+
+  state.formData = mergeDeep(
+    deepClone(DEFAULT_FORM_DATA),
+    draftSnapshot
+  );
+
+  state.formData.title = draftSnapshot.title || attrs.title || state.formData.title || "";
+  state.formData.description = draftSnapshot.description || attrs.description || state.formData.description || "";
+  state.formData.status = draftSnapshot.status || publicData.status || "draft";
+  state.formData.currentStep = Number(draftSnapshot.currentStep || publicData.currentStep || 1) || 1;
+  state.formData.listingId = listingId || state.formData.listingId || null;
+
+  state.currentStep = state.formData.currentStep;
+  state.isDirty = false;
+}
 
   async function uploadImageToCloudinary(file) {
     if (!file) {
@@ -513,11 +550,11 @@ window.GKFormApp = (() => {
   }
 
     async function createListingDraft(primaryCategory = null) {
-  const listingIdFromUrl = getQueryParam("id");
+  const existingId = getEffectiveListingId();
 
-  if (!state.listingId && listingIdFromUrl) {
-    state.listingId = listingIdFromUrl;
-    return listingIdFromUrl;
+  if (existingId) {
+    persistListingId(existingId);
+    return existingId;
   }
 
   const response = await fetchWithAuthRetry(
@@ -553,75 +590,79 @@ window.GKFormApp = (() => {
     throw new Error(message);
   }
 
-  state.listingId = data?.data?.id?.uuid || data?.data?.id || null;
+  const listingId = data?.data?.id?.uuid || data?.data?.id || null;
+  persistListingId(listingId);
+
   markDirty();
 
   emit("gk:draftCreated", {
-    listingId: state.listingId,
+    listingId,
     response: data
   });
 
-  return state.listingId;
+  return listingId;
 }
 
     async function updateListingDraft(dataToUpdate = {}) {
-    if (!state.listingId) {
-      throw new Error("Listing ID manquant");
-    }
+  const effectiveListingId = getEffectiveListingId();
 
-    const response = await fetchWithAuthRetry(
-      "https://flex-api.sharetribe.com/v1/api/own_listings/update",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          id: state.listingId,
-          ...dataToUpdate
-        })
-      }
-    );
-
-    const { rawText, data } = await parseResponseSafely(response);
-
-    if (!response.ok) {
-      const message =
-        data?.errors?.[0]?.title ||
-        data?.errors?.[0]?.detail ||
-        data?.error_description ||
-        data?.error ||
-        rawText ||
-        "Impossible de mettre à jour le draft";
-
-      throw new Error(message);
-    }
-
-    markDirty();
-
-    emit("gk:draftUpdated", {
-      response: data
-    });
-
-    return data;
+  if (!effectiveListingId) {
+    throw new Error("Listing ID manquant");
   }
+
+  persistListingId(effectiveListingId);
+
+  const response = await fetchWithAuthRetry(
+    "https://flex-api.sharetribe.com/v1/api/own_listings/update",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        id: effectiveListingId,
+        ...dataToUpdate
+      })
+    }
+  );
+
+  const { rawText, data } = await parseResponseSafely(response);
+
+  if (!response.ok) {
+    const message =
+      data?.errors?.[0]?.title ||
+      data?.errors?.[0]?.detail ||
+      data?.error_description ||
+      data?.error ||
+      rawText ||
+      "Impossible de mettre à jour le draft";
+
+    throw new Error(message);
+  }
+
+  markDirty();
+
+  emit("gk:draftUpdated", {
+    response: data
+  });
+
+  return data;
+}
 
   async function syncDraft(extra = {}) {
-  if (!state.listingId) {
-    const listingIdFromUrl = getQueryParam("id");
-    if (listingIdFromUrl) {
-      state.listingId = listingIdFromUrl;
-    }
-  }
+  const effectiveListingId = getEffectiveListingId();
 
-  if (!state.listingId) {
+  if (!effectiveListingId) {
     throw new Error("Listing ID toujours manquant (syncDraft)");
   }
+
+  persistListingId(effectiveListingId);
 
   const cleanPublicData = buildCleanPublicData();
 
   return updateListingDraft({
+    id: effectiveListingId,
     title: state.formData.title || "Brouillon",
     description: state.formData.description || "Draft en cours de création",
     publicData: {
@@ -1914,15 +1955,13 @@ if (saveQuitBtn) {
     state.isExplicitlySaving = true;
     state.formData.currentStep = state.currentStep;
 
-    const listingIdFromUrl = getQueryParam("id");
+    const effectiveListingId = getEffectiveListingId();
 
-    if (listingIdFromUrl) {
-      state.listingId = listingIdFromUrl;
-    }
-
-    if (!state.listingId) {
+    if (!effectiveListingId) {
       throw new Error("Aucun listingId trouvé pour sauvegarder ce brouillon.");
     }
+
+    persistListingId(effectiveListingId);
 
     await syncDraft();
     markClean();
@@ -1962,16 +2001,14 @@ async function init() {
   const stepFromUrl = Number(getQueryParam("step"));
 
   if (listingIdFromUrl) {
-    state.listingId = listingIdFromUrl;
+    persistListingId(listingIdFromUrl);
 
     try {
       const listingData = await fetchOwnListing(listingIdFromUrl);
       hydrateStateFromListingResponse(listingData);
     } catch (error) {
       console.error("GK INIT LOAD ERROR:", error);
-
-      // on garde quand même l'id présent dans l'URL
-      state.listingId = listingIdFromUrl;
+      persistListingId(listingIdFromUrl);
     }
   }
 
