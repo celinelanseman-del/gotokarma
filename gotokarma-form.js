@@ -1882,32 +1882,38 @@ window.GKFormApp = (() => {
     }
 
     const saveQuitBtn = e.target.closest(".btn-save-quit");
-    if (saveQuitBtn) {
-      e.preventDefault();
-      e.stopPropagation();
+if (saveQuitBtn) {
+  e.preventDefault();
+  e.stopPropagation();
 
-      try {
-        console.log("SAVE QUIT CLICKED");
-        state.isExplicitlySaving = true;
-        state.formData.currentStep = state.currentStep;
+  try {
+    console.log("SAVE QUIT CLICKED");
+    state.isExplicitlySaving = true;
+    state.formData.currentStep = state.currentStep;
 
-        if (!state.listingId) {
-          await createListingDraft(state.formData.categories[0] || null);
-        }
+    const listingIdFromUrl = getQueryParam("id");
 
-        await syncDraft();
-        markClean();
-
-        window.location.href = "/dashboard?tab=announcements";
-      } catch (error) {
-        console.error("SAVE & QUIT ERROR:", error);
-        alert(error.message || "Erreur lors de l’enregistrement.");
-      } finally {
-        state.isExplicitlySaving = false;
-      }
-
-      return;
+    if (!state.listingId && listingIdFromUrl) {
+      state.listingId = listingIdFromUrl;
     }
+
+    if (!state.listingId) {
+      await createListingDraft(state.formData.categories[0] || null);
+    }
+
+    await syncDraft();
+    markClean();
+
+    window.location.href = "/dashboard?tab=announcements";
+  } catch (error) {
+    console.error("SAVE & QUIT ERROR:", error);
+    alert(error.message || "Erreur lors de l’enregistrement.");
+  } finally {
+    state.isExplicitlySaving = false;
+  }
+
+  return;
+}
 
     const goStepBtn = e.target.closest(".btn-go-step");
     if (goStepBtn) {
