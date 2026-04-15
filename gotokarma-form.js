@@ -2202,3 +2202,4 @@ document.addEventListener("DOMContentLoaded", async () => {
 window.addEventListener("load", () => {
   setTimeout(forceRestoreDraftContext, 100);
 });
+console.log("GOTOKARMA FORM VERSION TEST 15");
