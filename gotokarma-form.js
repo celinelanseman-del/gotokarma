@@ -1784,94 +1784,82 @@ window.GKFormApp = (() => {
   }
 
   function bindGlobalNavigation() {
-  function bindButtons() {
-    const backBtn = document.querySelector(".btn-back");
-    const nextBtn = document.querySelector(".btn-next");
-    const saveQuitBtn = document.querySelector(".btn-save-quit");
+  if (document.body.dataset.gkGlobalNavBound === "true") return;
+  document.body.dataset.gkGlobalNavBound = "true";
 
-    if (backBtn && backBtn.dataset.gkBackBound !== "true") {
-      backBtn.dataset.gkBackBound = "true";
+  document.addEventListener("click", async (e) => {
+    const backBtn = e.target.closest(".btn-back");
+    if (backBtn) {
+      e.preventDefault();
+      e.stopPropagation();
 
-      backBtn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+      const handled = await runStepAction(state.currentStep, "back");
+      if (handled === false) return;
 
-        const handled = await runStepAction(state.currentStep, "back");
-        if (handled === false) return;
-
-        prevStep();
-      });
+      prevStep();
+      return;
     }
 
-    if (nextBtn && nextBtn.dataset.gkNextBound !== "true") {
-      nextBtn.dataset.gkNextBound = "true";
+    const nextBtn = e.target.closest(".btn-next");
+    if (nextBtn) {
+      e.preventDefault();
+      e.stopPropagation();
 
-      nextBtn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+      const handled = await runStepAction(state.currentStep, "next");
 
-        const handled = await runStepAction(state.currentStep, "next");
+      if (handled === false) return;
+      if (handled === true) return;
 
-        if (handled === false) return;
-        if (handled === true) return;
+      const currentStepEl = getCurrentStepElement();
+      const validationError = validateCurrentStep();
 
-        const currentStepEl = getCurrentStepElement();
-        const validationError = validateCurrentStep();
+      if (validationError) {
+        showError(currentStepEl, validationError);
+        return;
+      }
 
-        if (validationError) {
-          showError(currentStepEl, validationError);
-          return;
+      nextStep();
+      return;
+    }
+
+    const saveQuitBtn = e.target.closest(".btn-save-quit");
+    if (saveQuitBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      try {
+        console.log("SAVE QUIT CLICKED");
+        state.isExplicitlySaving = true;
+        state.formData.currentStep = state.currentStep;
+
+        if (!state.listingId) {
+          await createListingDraft(state.formData.categories[0] || null);
         }
 
-        nextStep();
-      });
+        await syncDraft();
+        markClean();
+
+        window.location.href = "/dashboard?tab=announcements";
+      } catch (error) {
+        console.error("SAVE & QUIT ERROR:", error);
+        alert(error.message || "Erreur lors de l’enregistrement.");
+      } finally {
+        state.isExplicitlySaving = false;
+      }
+
+      return;
     }
 
-    if (saveQuitBtn && saveQuitBtn.dataset.gkSaveQuitBound !== "true") {
-      saveQuitBtn.dataset.gkSaveQuitBound = "true";
+    const goStepBtn = e.target.closest(".btn-go-step");
+    if (goStepBtn) {
+      e.preventDefault();
+      e.stopPropagation();
 
-      saveQuitBtn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        try {
-          console.log("SAVE QUIT CLICKED");
-          state.isExplicitlySaving = true;
-          state.formData.currentStep = state.currentStep;
-
-          if (!state.listingId) {
-            await createListingDraft(state.formData.categories[0] || null);
-          }
-
-          await syncDraft();
-          markClean();
-
-          window.location.href = "/dashboard?tab=announcements";
-        } catch (error) {
-          console.error("SAVE & QUIT ERROR:", error);
-          alert(error.message || "Erreur lors de l’enregistrement.");
-        } finally {
-          state.isExplicitlySaving = false;
-        }
-      });
+      const step = Number(goStepBtn.getAttribute("data-step"));
+      if (!step) return;
+      goToStep(step);
     }
-
-    $$(".btn-go-step").forEach(btn => {
-      if (btn.dataset.gkGoStepBound === "true") return;
-      btn.dataset.gkGoStepBound = "true";
-
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const step = Number(btn.getAttribute("data-step"));
-        if (!step) return;
-        goToStep(step);
-      });
-    });
-  }
-
-  bindButtons();
-  setTimeout(bindButtons, 300);
+  });
 }
 
   function hydrateCommonUI() {
