@@ -211,32 +211,35 @@ window.GKFormApp = (() => {
   }
 
   function showStep(step) {
-    const normalizedStep = Math.max(1, Math.min(TOTAL_STEPS, Number(step) || 1));
+  const normalizedStep = Math.max(1, Math.min(TOTAL_STEPS, Number(step) || 1));
 
-    $$('[class^="step-"]').forEach(el => {
+  for (let i = 1; i <= TOTAL_STEPS; i += 1) {
+    document.querySelectorAll(`.step-${i}`).forEach(el => {
       el.style.display = "none";
     });
-
-    const active = $(`.step-${normalizedStep}`);
-    if (active) {
-      active.style.display = "block";
-    }
-
-    state.currentStep = normalizedStep;
-    state.formData.currentStep = normalizedStep;
-
-    updateProgress();
-    saveStateToStorage();
-
-    requestAnimationFrame(() => {
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth"
-      });
-    });
-
-    emit("gk:stepChanged", { step: normalizedStep });
   }
+
+  document.querySelectorAll(`.step-${normalizedStep}`).forEach(el => {
+    el.style.display = "block";
+  });
+
+  state.currentStep = normalizedStep;
+  state.formData.currentStep = normalizedStep;
+
+  updateProgress();
+  saveStateToStorage();
+
+  requestAnimationFrame(() => {
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth"
+    });
+  });
+
+  console.log("SHOW STEP:", normalizedStep);
+
+  emit("gk:stepChanged", { step: normalizedStep });
+}
 
   function nextStep() {
     if (state.currentStep < TOTAL_STEPS) {
