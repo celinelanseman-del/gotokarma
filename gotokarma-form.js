@@ -349,20 +349,89 @@ window.GKFormApp = (() => {
     return { rawText, data };
   }
 
-  async function fetchOwnListing(listingId) {
-    const token = localStorage.getItem("accessToken");
+    async function refreshAccessTokenIfNeeded() {
+    const refreshToken = localStorage.getItem("refreshToken");
 
-    if (!token) {
-      window.location.href = "/login?redirect=/devenir-organisateur";
-      return;
+    if (!refreshToken) {
+      throw new Error("Aucun refresh token disponible.");
     }
 
-    const response = await fetch(
+    const body = new URLSearchParams({
+      client_id: window.SHARETRIBE_CLIENT_ID || "121db1ac-ac2b-4435-aa87-e83976113ffa",
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      scope: "user"
+    });
+
+    const response = await fetch("https://flex-api.sharetribe.com/v1/auth/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json"
+      },
+      body: body.toString()
+    });
+
+    const { rawText, data } = await parseResponseSafely(response);
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error_description ||
+        data?.error ||
+        rawText ||
+        "Impossible de refresh le token."
+      );
+    }
+
+    localStorage.setItem("accessToken", data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem("refreshToken", data.refresh_token);
+    }
+
+    return data.access_token;
+  }
+
+  async function getValidAccessToken() {
+    let token = localStorage.getItem("accessToken");
+
+    if (!token) {
+      throw new Error("Aucun access token disponible.");
+    }
+
+    return token;
+  }
+
+  async function fetchWithAuthRetry(url, options = {}) {
+    let token = await getValidAccessToken();
+
+    const makeRequest = async (bearerToken) => {
+      const headers = {
+        ...(options.headers || {}),
+        Authorization: "bearer " + bearerToken
+      };
+
+      return fetch(url, {
+        ...options,
+        headers
+      });
+    };
+
+    let response = await makeRequest(token);
+
+    if (response.status === 401) {
+      token = await refreshAccessTokenIfNeeded();
+      response = await makeRequest(token);
+    }
+
+    return response;
+  }
+
+  async function fetchOwnListing(listingId) {
+    const response = await fetchWithAuthRetry(
       `https://flex-api.sharetribe.com/v1/api/own_listings/show?id=${encodeURIComponent(listingId)}`,
       {
         method: "GET",
         headers: {
-          "Authorization": "bearer " + token,
           "Accept": "application/json"
         }
       }
@@ -438,30 +507,25 @@ window.GKFormApp = (() => {
     };
   }
 
-  async function createListingDraft(primaryCategory = null) {
-    const token = localStorage.getItem("accessToken");
-
-    if (!token) {
-      window.location.href = "/login?redirect=/devenir-organisateur";
-      return;
-    }
-
-    const response = await fetch("https://flex-api.sharetribe.com/v1/api/own_listings/create_draft", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "bearer " + token,
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        title: state.formData.title || "Brouillon",
-        description: state.formData.description || "Draft en cours de création",
-        publicData: {
-          primaryCategory: primaryCategory || state.formData.categories[0] || null,
-          ...buildCleanPublicData()
-        }
-      })
-    });
+    async function createListingDraft(primaryCategory = null) {
+    const response = await fetchWithAuthRetry(
+      "https://flex-api.sharetribe.com/v1/api/own_listings/create_draft",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          title: state.formData.title || "Brouillon",
+          description: state.formData.description || "Draft en cours de création",
+          publicData: {
+            primaryCategory: primaryCategory || state.formData.categories[0] || null,
+            ...buildCleanPublicData()
+          }
+        })
+      }
+    );
 
     const { rawText, data } = await parseResponseSafely(response);
 
@@ -488,30 +552,25 @@ window.GKFormApp = (() => {
     return state.listingId;
   }
 
-  async function updateListingDraft(dataToUpdate = {}) {
-    const token = localStorage.getItem("accessToken");
-
-    if (!token) {
-      window.location.href = "/login?redirect=/devenir-organisateur";
-      return;
-    }
-
+    async function updateListingDraft(dataToUpdate = {}) {
     if (!state.listingId) {
       throw new Error("Listing ID manquant");
     }
 
-    const response = await fetch("https://flex-api.sharetribe.com/v1/api/own_listings/update", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "bearer " + token,
-        "Accept": "application/json"
-      },
-      body: JSON.stringify({
-        id: state.listingId,
-        ...dataToUpdate
-      })
-    });
+    const response = await fetchWithAuthRetry(
+      "https://flex-api.sharetribe.com/v1/api/own_listings/update",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          id: state.listingId,
+          ...dataToUpdate
+        })
+      }
+    );
 
     const { rawText, data } = await parseResponseSafely(response);
 
